@@ -6,7 +6,7 @@ import {
   useWaitForTransactionReceipt,
 } from "wagmi";
 import nftAuctionAbi from "../abi/NFTAuction.json";
-import { NFT_AUCTION_ADDRESS } from "../config/contracts";
+import { useDexConfig } from "../dex/DexConfigContext";
 import type { AuctionView } from "../types/auction";
 
 type Props = {
@@ -25,6 +25,7 @@ function formatTimeLeft(auction: AuctionView): string {
 }
 
 export function AuctionCard({ auction, onUpdated }: Props) {
+  const { nftAuctionAddress } = useDexConfig();
   const { address, isConnected } = useAccount();
   const [bidEth, setBidEth] = useState("0.02");
 
@@ -61,7 +62,7 @@ export function AuctionCard({ auction, onUpdated }: Props) {
     const value = parseEther(bidEth);
     if (value < minNextBid) return;
     writeContract({
-      address: NFT_AUCTION_ADDRESS,
+      address: nftAuctionAddress,
       abi: nftAuctionAbi,
       functionName: "bid",
       args: [BigInt(auction.id)],
@@ -71,7 +72,7 @@ export function AuctionCard({ auction, onUpdated }: Props) {
 
   function endAuction() {
     writeContract({
-      address: NFT_AUCTION_ADDRESS,
+      address: nftAuctionAddress,
       abi: nftAuctionAbi,
       functionName: "endAuction",
       args: [BigInt(auction.id)],

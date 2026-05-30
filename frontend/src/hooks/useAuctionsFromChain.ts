@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { useReadContract, useReadContracts } from "wagmi";
 import nftAuctionAbi from "../abi/NFTAuction.json";
-import { NFT_AUCTION_ADDRESS } from "../config/contracts";
+import { useDexConfig } from "../dex/DexConfigContext";
+import { isZeroAddress } from "../dex/resolveConfig";
 import type { AuctionOnChain, AuctionView } from "../types/auction";
 
 type AuctionStruct = {
@@ -61,12 +62,15 @@ function parseAuction(raw: unknown): AuctionOnChain | null {
 
 /** Reads auction list directly from the NFTAuction contract. */
 export function useAuctionsFromChain(enabled = true) {
+  const { nftAuctionAddress } = useDexConfig();
+  const hasConfig = !isZeroAddress(nftAuctionAddress);
+
   const { data: count, isLoading: countLoading, refetch: refetchCount } =
     useReadContract({
-      address: NFT_AUCTION_ADDRESS,
+      address: nftAuctionAddress,
       abi: nftAuctionAbi,
       functionName: "auctionCount",
-      query: { enabled },
+      query: { enabled: enabled && hasConfig },
     });
 
   const auctionIds = useMemo(() => {
@@ -78,12 +82,12 @@ export function useAuctionsFromChain(enabled = true) {
   const { data: results, isLoading: listLoading, refetch: refetchList } =
     useReadContracts({
       contracts: auctionIds.map((id) => ({
-        address: NFT_AUCTION_ADDRESS,
+        address: nftAuctionAddress,
         abi: nftAuctionAbi,
         functionName: "getAuction" as const,
         args: [BigInt(id)] as const,
       })),
-      query: { enabled: enabled && auctionIds.length > 0 },
+      query: { enabled: enabled && hasConfig && auctionIds.length > 0 },
     });
 
   const auctions: AuctionView[] = useMemo(() => {
@@ -104,9 +108,8 @@ export function useAuctionsFromChain(enabled = true) {
 
   return {
     auctions,
-    isLoading: enabled && (countLoading || listLoading),
+    isLoading: enabled && hasConfig && (countLoading || listLoading),
     refetch,
-    hasConfig:
-      NFT_AUCTION_ADDRESS !== "0x0000000000000000000000000000000000000000",
+    hasConfig,
   };
 }

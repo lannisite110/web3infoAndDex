@@ -204,3 +204,45 @@ npx hardhat test
 6. MetaMask 选 **Sepolia** 后打开该链接即可使用
 
 改环境变量后，在 Vercel 项目里 **Redeploy** 一次才会生效。
+
+## 阶段 3：可嵌入 DEX 组件
+
+拍卖 UI 已抽成 **`NFTAuctionDex`**（`frontend/src/dex/`），可嵌入任意站点。
+
+### iframe 嵌入（最简单）
+
+```html
+<iframe
+  src="https://web3info-and-dex.vercel.app/embed.html"
+  title="NFT Auction DEX"
+  width="100%"
+  height="900"
+  style="border:0;border-radius:12px;max-width:720px"
+></iframe>
+```
+
+### React 嵌入
+
+```tsx
+import { NFTAuctionDex } from "./dex";
+
+<NFTAuctionDex
+  embedded
+  title="NFT 拍卖"
+  showContractInfo={false}
+  config={{
+    nftAuctionAddress: "0x751D5EDA4EFA561702EFfAe3d6096B28206df575",
+    testNftAddress: "0x8D8AD875810933D40dba91378c680d39223114c9",
+    sepoliaRpcUrl: "https://sepolia.infura.io/v3/YOUR_KEY",
+  }}
+/>
+```
+
+详细说明见 [`packages/nft-auction-dex/README.md`](packages/nft-auction-dex/README.md)。
+
+### 本地预览 embed 页
+
+```bash
+cd frontend && npm run dev
+# 打开 http://localhost:5173/embed.html
+```

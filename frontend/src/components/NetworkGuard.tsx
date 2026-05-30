@@ -1,12 +1,13 @@
 import { useAccount, useSwitchChain } from "wagmi";
 import { sepolia } from "wagmi/chains";
-import { SEPOLIA_CHAIN_ID } from "../config/contracts";
+import { useDexConfig } from "../dex/DexConfigContext";
 
 export function NetworkGuard() {
+  const { chainId: expectedChainId } = useDexConfig();
   const { isConnected, chainId } = useAccount();
   const { switchChain, isPending } = useSwitchChain();
 
-  if (!isConnected || chainId === SEPOLIA_CHAIN_ID) {
+  if (!isConnected || chainId === expectedChainId) {
     return null;
   }
 

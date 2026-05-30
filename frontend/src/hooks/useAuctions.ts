@@ -1,20 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchAuctionsFromApi } from "../api/auctions";
-import { API_BASE_URL, isApiConfigured } from "../config/api";
+import { isApiEnabled, isZeroAddress } from "../dex/resolveConfig";
+import { useDexConfig } from "../dex/DexConfigContext";
 import { useAuctionsFromChain } from "./useAuctionsFromChain";
 
 export type AuctionDataSource = "api" | "chain";
 
 /**
- * Auction list: prefers backend API when VITE_API_URL is set,
+ * Auction list: prefers backend API when configured,
  * falls back to on-chain reads only after API retries are exhausted.
  */
 export function useAuctions() {
-  const useApi = isApiConfigured();
+  const { apiBaseUrl, nftAuctionAddress } = useDexConfig();
+  const useApi = isApiEnabled(apiBaseUrl);
 
   const apiQuery = useQuery({
-    queryKey: ["auctions", API_BASE_URL],
-    queryFn: () => fetchAuctionsFromApi(API_BASE_URL),
+    queryKey: ["auctions", apiBaseUrl],
+    queryFn: () => fetchAuctionsFromApi(apiBaseUrl),
     enabled: useApi,
     staleTime: 10_000,
     refetchInterval: 15_000,
@@ -48,10 +50,10 @@ export function useAuctions() {
     auctions,
     isLoading,
     refetch,
-    hasConfig: chain.hasConfig,
+    hasConfig: !isZeroAddress(nftAuctionAddress),
     source,
     apiPending,
     apiError: apiFailed ? apiQuery.error : null,
-    apiBaseUrl: API_BASE_URL,
+    apiBaseUrl,
   };
 }

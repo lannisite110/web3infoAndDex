@@ -10,19 +10,18 @@ import {
 } from "wagmi";
 import nftAuctionAbi from "../abi/NFTAuction.json";
 import testNftAbi from "../abi/TestNFT.json";
-import {
-  NFT_AUCTION_ADDRESS,
-  SEPOLIA_CHAIN_ID,
-  TEST_NFT_ADDRESS,
-} from "../config/contracts";
+import { useDexConfig } from "../dex/DexConfigContext";
+import { isZeroAddress } from "../dex/resolveConfig";
 import { parseTokenId } from "../utils/tokenId";
 
 type Props = { onSuccess?: () => void };
 
 export function CreateAuctionForm({ onSuccess }: Props) {
+  const { nftAuctionAddress, testNftAddress, chainId: expectedChainId } =
+    useDexConfig();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const onSepolia = chainId === SEPOLIA_CHAIN_ID;
+  const onSepolia = chainId === expectedChainId;
 
   const [tokenId, setTokenId] = useState("1");
   const [startPriceEth, setStartPriceEth] = useState("0.01");
@@ -43,10 +42,10 @@ export function CreateAuctionForm({ onSuccess }: Props) {
   });
 
   const { data: isApproved, refetch: refetchApproval } = useReadContract({
-    address: TEST_NFT_ADDRESS,
+    address: testNftAddress,
     abi: testNftAbi,
     functionName: "isApprovedForAll",
-    args: address ? [address, NFT_AUCTION_ADDRESS] : undefined,
+    args: address ? [address, nftAuctionAddress] : undefined,
     query: { enabled: Boolean(address && onSepolia) },
   });
 
@@ -56,7 +55,7 @@ export function CreateAuctionForm({ onSuccess }: Props) {
     error: ownerOfErr,
     isLoading: ownerOfLoading,
   } = useReadContract({
-    address: TEST_NFT_ADDRESS,
+    address: testNftAddress,
     abi: testNftAbi,
     functionName: "ownerOf",
     args: parsedTokenId !== null ? [parsedTokenId] : undefined,
@@ -75,22 +74,22 @@ export function CreateAuctionForm({ onSuccess }: Props) {
       ownerOfErr?.message?.includes("HTTP request failed"));
 
   const approveSim = useSimulateContract({
-    address: TEST_NFT_ADDRESS,
+    address: testNftAddress,
     abi: testNftAbi,
     functionName: "setApprovalForAll",
-    args: [NFT_AUCTION_ADDRESS, true],
+    args: [nftAuctionAddress, true],
     query: { enabled: isConnected && onSepolia && !isApproved },
   });
 
   const durationSec = BigInt(Math.max(1, Number(durationMin) || 1) * 60);
   const createSim = useSimulateContract({
-    address: NFT_AUCTION_ADDRESS,
+    address: nftAuctionAddress,
     abi: nftAuctionAbi,
     functionName: "createAuction",
     args:
       parsedTokenId !== null
         ? [
-            TEST_NFT_ADDRESS,
+            testNftAddress,
             parsedTokenId,
             parseEther(startPriceEth || "0"),
             durationSec,
@@ -107,7 +106,7 @@ export function CreateAuctionForm({ onSuccess }: Props) {
   });
 
   const nftReady =
-    TEST_NFT_ADDRESS !== "0x0000000000000000000000000000000000000000";
+    !isZeroAddress(testNftAddress);
 
   const busy = isPending || confirming;
 
@@ -210,7 +209,7 @@ export function CreateAuctionForm({ onSuccess }: Props) {
             当前钱包不拥有 Token #{tokenId}。在项目根目录执行：
             <br />
             <code>
-              TEST_NFT_ADDRESS={TEST_NFT_ADDRESS} npm run mint:nfts
+              TEST_NFT_ADDRESS={testNftAddress} npm run mint:nfts
             </code>
           </p>
         )}
