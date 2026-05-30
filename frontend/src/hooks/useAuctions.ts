@@ -1,111 +1,52 @@
-import { useMemo } from "react";
-import { useReadContract, useReadContracts } from "wagmi";
-import nftAuctionAbi from "../abi/NFTAuction.json";
-import { NFT_AUCTION_ADDRESS } from "../config/contracts";
-import type { AuctionOnChain, AuctionView } from "../types/auction";
+import { useQuery } from "@tanstack/react-query";
+import { fetchAuctionsFromApi } from "../api/auctions";
+import { API_BASE_URL, isApiConfigured } from "../config/api";
+import { useAuctionsFromChain } from "./useAuctionsFromChain";
 
-type AuctionStruct = {
-  seller: `0x${string}`;
-  nftContract: `0x${string}`;
-  tokenId: bigint;
-  startPrice: bigint;
-  startTime: bigint;
-  duration: bigint;
-  highestBidder: `0x${string}`;
-  highestBid: bigint;
-  ended: boolean;
-};
+export type AuctionDataSource = "api" | "chain";
 
-/** wagmi/viem 可能返回 struct 对象或元组数组，两种都支持 */
-function parseAuction(raw: unknown): AuctionOnChain | null {
-  if (!raw || typeof raw !== "object") return null;
-
-  if (Array.isArray(raw)) {
-    const [
-      seller,
-      nftContract,
-      tokenId,
-      startPrice,
-      startTime,
-      duration,
-      highestBidder,
-      highestBid,
-      ended,
-    ] = raw;
-    return {
-      seller: seller as `0x${string}`,
-      nftContract: nftContract as `0x${string}`,
-      tokenId: tokenId as bigint,
-      startPrice: startPrice as bigint,
-      startTime: startTime as bigint,
-      duration: duration as bigint,
-      highestBidder: highestBidder as `0x${string}`,
-      highestBid: highestBid as bigint,
-      ended: ended as boolean,
-    };
-  }
-
-  const s = raw as AuctionStruct;
-  if (s.seller === undefined || s.tokenId === undefined) return null;
-  return {
-    seller: s.seller,
-    nftContract: s.nftContract,
-    tokenId: s.tokenId,
-    startPrice: s.startPrice,
-    startTime: s.startTime,
-    duration: s.duration,
-    highestBidder: s.highestBidder,
-    highestBid: s.highestBid,
-    ended: s.ended,
-  };
-}
-
-/** 从链上读取拍卖总数 + 每条拍卖详情 */
+/**
+ * Auction list: prefers backend API when VITE_API_URL is set,
+ * falls back to on-chain reads if the API is unavailable.
+ */
 export function useAuctions() {
-  const { data: count, isLoading: countLoading, refetch: refetchCount } =
-    useReadContract({
-      address: NFT_AUCTION_ADDRESS,
-      abi: nftAuctionAbi,
-      functionName: "auctionCount",
-    });
+  const useApi = isApiConfigured();
 
-  const auctionIds = useMemo(() => {
-    const n = count ? Number(count) : 0;
-    if (!Number.isFinite(n) || n < 0) return [];
-    return Array.from({ length: n }, (_, i) => i + 1);
-  }, [count]);
+  const apiQuery = useQuery({
+    queryKey: ["auctions", API_BASE_URL],
+    queryFn: () => fetchAuctionsFromApi(API_BASE_URL),
+    enabled: useApi,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
 
-  const { data: results, isLoading: listLoading, refetch: refetchList } =
-    useReadContracts({
-      contracts: auctionIds.map((id) => ({
-        address: NFT_AUCTION_ADDRESS,
-        abi: nftAuctionAbi,
-        functionName: "getAuction" as const,
-        args: [BigInt(id)] as const,
-      })),
-      query: { enabled: auctionIds.length > 0 },
-    });
+  const useChain = !useApi || apiQuery.isError;
+  const chain = useAuctionsFromChain(useChain);
 
-  const auctions: AuctionView[] = useMemo(() => {
-    if (!results) return [];
-    return results.flatMap((item, index) => {
-      if (item.status !== "success" || item.result == null) return [];
-      const parsed = parseAuction(item.result);
-      if (!parsed) return [];
-      const id = auctionIds[index];
-      return [{ id, ...parsed }];
-    });
-  }, [results, auctionIds]);
+  const source: AuctionDataSource =
+    useApi && !apiQuery.isError ? "api" : "chain";
+
+  const auctions =
+    source === "api" && apiQuery.data ? apiQuery.data : chain.auctions;
+
+  const isLoading = useApi
+    ? apiQuery.isLoading || (apiQuery.isError && chain.isLoading)
+    : chain.isLoading;
 
   const refetch = async () => {
-    await refetchCount();
-    await refetchList();
+    const tasks: Promise<unknown>[] = [];
+    if (useApi) tasks.push(apiQuery.refetch());
+    if (useChain) tasks.push(chain.refetch());
+    await Promise.all(tasks);
   };
 
   return {
     auctions,
-    isLoading: countLoading || listLoading,
+    isLoading,
     refetch,
-    hasConfig: NFT_AUCTION_ADDRESS !== "0x0000000000000000000000000000000000000000",
+    hasConfig: chain.hasConfig,
+    source,
+    apiError: useApi && apiQuery.isError ? apiQuery.error : null,
   };
 }

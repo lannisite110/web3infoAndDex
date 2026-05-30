@@ -2,14 +2,19 @@ import { useAuctions } from "../hooks/useAuctions";
 import { AuctionCard } from "./AuctionCard";
 
 export function AuctionList() {
-  const { auctions, isLoading, refetch, hasConfig } = useAuctions();
+  const { auctions, isLoading, refetch, hasConfig, source, apiError } =
+    useAuctions();
 
   if (!hasConfig) {
     return <p className="muted">请配置 NFT_AUCTION_ADDRESS。</p>;
   }
 
   if (isLoading) {
-    return <p className="muted">从链上加载拍卖列表…</p>;
+    return (
+      <p className="muted">
+        {source === "api" ? "从 API 加载拍卖列表…" : "从链上加载拍卖列表…"}
+      </p>
+    );
   }
 
   if (auctions.length === 0) {
@@ -26,6 +31,10 @@ export function AuctionList() {
         <button type="button" className="secondary" onClick={() => refetch()}>
           刷新列表
         </button>
+        <span className="muted" style={{ fontSize: "0.85rem" }}>
+          数据来源：{source === "api" ? "后端 API" : "链上 RPC"}
+          {apiError ? "（API 不可用，已回退链上）" : ""}
+        </span>
       </div>
       {auctions.map((a) => (
         <AuctionCard key={a.id} auction={a} onUpdated={() => refetch()} />
