@@ -92,6 +92,9 @@ func Load() (Config, error) {
 
 	auctionContract := strings.ToLower(sanitizeEnv(os.Getenv("NFT_AUCTION_ADDRESS")))
 	sepoliaRPC := sanitizeEnv(os.Getenv("SEPOLIA_RPC_URL"))
+	if err := ValidateRPCURL(sepoliaRPC); err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Port:            port,
