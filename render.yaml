@@ -1,11 +1,11 @@
 # Render Blueprint：https://render.com/docs/blueprint-spec
-# 在 Render Dashboard → New → Blueprint → 连接 GitHub 仓库即可一键创建
 services:
   - type: web
     name: web3infoanddex-api
-    runtime: docker
+    runtime: go
     rootDir: backend
-    dockerfilePath: ./Dockerfile
+    buildCommand: go build -trimpath -ldflags="-s -w" -o server ./cmd/server
+    startCommand: ./server
     plan: free
     healthCheckPath: /health
     envVars:
