@@ -50,12 +50,12 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid PORT %q: %w", port, err)
 	}
 
-	mongoURI := strings.TrimSpace(os.Getenv("MONGODB_URI"))
+	mongoURI := sanitizeEnv(os.Getenv("MONGODB_URI"))
 	if mongoURI == "" {
 		return Config{}, fmt.Errorf("MONGODB_URI is required (MongoDB Atlas connection string)")
 	}
 
-	dbName := strings.TrimSpace(os.Getenv("MONGODB_DB"))
+	dbName := sanitizeEnv(os.Getenv("MONGODB_DB"))
 	if dbName == "" {
 		dbName = DefaultMongoDBName
 	}
@@ -87,8 +87,8 @@ func Load() (Config, error) {
 		deployBlock = parsed
 	}
 
-	auctionContract := strings.ToLower(strings.TrimSpace(os.Getenv("NFT_AUCTION_ADDRESS")))
-	sepoliaRPC := strings.TrimSpace(os.Getenv("SEPOLIA_RPC_URL"))
+	auctionContract := strings.ToLower(sanitizeEnv(os.Getenv("NFT_AUCTION_ADDRESS")))
+	sepoliaRPC := sanitizeEnv(os.Getenv("SEPOLIA_RPC_URL"))
 
 	return Config{
 		Port:            port,
@@ -106,4 +106,10 @@ func Load() (Config, error) {
 // IndexerEnabled reports whether background chain sync should run.
 func (c Config) IndexerEnabled() bool {
 	return c.SepoliaRPCURL != "" && c.AuctionContract != ""
+}
+
+// sanitizeEnv trims whitespace and surrounding quotes from dashboard-pasted values.
+func sanitizeEnv(v string) string {
+	v = strings.TrimSpace(v)
+	return strings.Trim(v, `"'`)
 }

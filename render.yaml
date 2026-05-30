@@ -1,11 +1,11 @@
 # Render Blueprint：https://render.com/docs/blueprint-spec
+# 使用 Docker + Go 1.24，避免 Render 原生 Go 1.26 与 Atlas TLS 不兼容
 services:
   - type: web
     name: web3infoanddex-api
-    runtime: go
+    runtime: docker
     rootDir: backend
-    buildCommand: go build -trimpath -ldflags="-s -w" -o server ./cmd/server
-    startCommand: ./server
+    dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /health
     envVars:

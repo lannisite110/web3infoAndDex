@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-const connectTimeout = 10 * time.Second
+const connectTimeout = 30 * time.Second
 
 // Mongo wraps a MongoDB client and database handle.
 type Mongo struct {
@@ -23,7 +24,11 @@ func Connect(ctx context.Context, uri, dbName string) (*Mongo, error) {
 	ctx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	client, err := mongo.Connect(ctx, options.Client().
+		ApplyURI(uri).
+		SetServerSelectionTimeout(connectTimeout).
+		SetTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("mongo connect: %w", err)
 	}
