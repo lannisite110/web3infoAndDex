@@ -198,7 +198,7 @@ npx hardhat test
    | `VITE_SEPOLIA_RPC_URL` | 与本地相同的 Sepolia RPC URL |
    | `VITE_NFT_AUCTION_ADDRESS` | `deploy-all` 输出的 NFTAuction 地址 |
    | `VITE_TEST_NFT_ADDRESS` | `deploy-all` 输出的 TestNFT 地址 |
-   | `VITE_API_URL` | Render 后端地址，如 `https://web3infoanddex-api.onrender.com`（先部署后端再填） |
+   | `VITE_API_URL` | **留空**（推荐）— 使用 `frontend/vercel.json` 同源代理 `/api` → Render，避免 CORS；本地开发在 `.env` 填 `http://localhost:8080` |
 
 5. 点 **Deploy**，完成后会得到 `https://xxx.vercel.app`  
 6. MetaMask 选 **Sepolia** 后打开该链接即可使用

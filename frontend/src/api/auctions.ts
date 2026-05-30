@@ -34,12 +34,18 @@ export function mapApiAuction(a: ApiAuction): AuctionView {
   };
 }
 
+function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { method: "GET", signal: controller.signal }).finally(() =>
+    clearTimeout(timer),
+  );
+}
+
 export async function fetchAuctionsFromApi(baseUrl: string): Promise<AuctionView[]> {
-  const res = await fetch(`${baseUrl}/api/v1/auctions`, {
-    method: "GET",
-    mode: "cors",
-    signal: AbortSignal.timeout(90_000),
-  });
+  const path = "/api/v1/auctions";
+  const url = baseUrl ? `${baseUrl}${path}` : path;
+  const res = await fetchWithTimeout(url, 90_000);
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${res.statusText}`);
   }
