@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { parseEther } from "viem";
 import {
   useAccount,
@@ -15,6 +15,7 @@ import {
   SEPOLIA_CHAIN_ID,
   TEST_NFT_ADDRESS,
 } from "../config/contracts";
+import { parseTokenId } from "../utils/tokenId";
 
 type Props = { onSuccess?: () => void };
 
@@ -26,6 +27,13 @@ export function CreateAuctionForm({ onSuccess }: Props) {
   const [tokenId, setTokenId] = useState("1");
   const [startPriceEth, setStartPriceEth] = useState("0.01");
   const [durationMin, setDurationMin] = useState("30");
+
+  const parsedTokenId = parseTokenId(tokenId);
+  const onSuccessRef = useRef(onSuccess);
+  onSuccessRef.current = onSuccess;
+
+  const lastActionRef = useRef<"approve" | "create" | null>(null);
+  const handledTxRef = useRef<string | null>(null);
 
   const { writeContract, data: txHash, isPending, error, reset } =
     useWriteContract();
@@ -42,18 +50,29 @@ export function CreateAuctionForm({ onSuccess }: Props) {
     query: { enabled: Boolean(address && onSepolia) },
   });
 
-  const { data: ownerOf } = useReadContract({
+  const {
+    data: ownerOf,
+    isError: ownerOfFailed,
+    error: ownerOfErr,
+    isLoading: ownerOfLoading,
+  } = useReadContract({
     address: TEST_NFT_ADDRESS,
     abi: testNftAbi,
     functionName: "ownerOf",
-    args: [BigInt(tokenId || "0")],
-    query: { enabled: onSepolia && Boolean(tokenId) },
+    args: parsedTokenId !== null ? [parsedTokenId] : undefined,
+    query: { enabled: onSepolia && parsedTokenId !== null },
   });
 
   const ownsToken =
+    !ownerOfFailed &&
     ownerOf &&
     address &&
     (ownerOf as string).toLowerCase() === address.toLowerCase();
+
+  const rpcLikelyBroken =
+    ownerOfFailed &&
+    (ownerOfErr?.message?.includes("Failed to fetch") ||
+      ownerOfErr?.message?.includes("HTTP request failed"));
 
   const approveSim = useSimulateContract({
     address: TEST_NFT_ADDRESS,
@@ -68,15 +87,22 @@ export function CreateAuctionForm({ onSuccess }: Props) {
     address: NFT_AUCTION_ADDRESS,
     abi: nftAuctionAbi,
     functionName: "createAuction",
-    args: [
-      TEST_NFT_ADDRESS,
-      BigInt(tokenId || "0"),
-      parseEther(startPriceEth || "0"),
-      durationSec,
-    ],
+    args:
+      parsedTokenId !== null
+        ? [
+            TEST_NFT_ADDRESS,
+            parsedTokenId,
+            parseEther(startPriceEth || "0"),
+            durationSec,
+          ]
+        : undefined,
     query: {
       enabled:
-        isConnected && onSepolia && Boolean(isApproved) && Boolean(ownsToken),
+        isConnected &&
+        onSepolia &&
+        Boolean(isApproved) &&
+        Boolean(ownsToken) &&
+        parsedTokenId !== null,
     },
   });
 
@@ -87,22 +113,31 @@ export function CreateAuctionForm({ onSuccess }: Props) {
 
   function runApprove() {
     if (!approveSim.data?.request) return;
+    lastActionRef.current = "approve";
     reset();
     writeContract(approveSim.data.request);
   }
 
   function runCreate() {
     if (!createSim.data?.request) return;
+    lastActionRef.current = "create";
     reset();
     writeContract(createSim.data.request);
   }
 
   useEffect(() => {
-    if (!isSuccess) return;
+    if (!isSuccess || !txHash) return;
+    if (handledTxRef.current === txHash) return;
+    handledTxRef.current = txHash;
+
     void refetchApproval();
-    onSuccess?.();
+
+    if (lastActionRef.current === "create") {
+      onSuccessRef.current?.();
+    }
+    lastActionRef.current = null;
     reset();
-  }, [isSuccess, refetchApproval, onSuccess, reset]);
+  }, [isSuccess, txHash, refetchApproval, reset]);
 
   if (!isConnected) {
     return (
@@ -113,7 +148,7 @@ export function CreateAuctionForm({ onSuccess }: Props) {
   if (!onSepolia) {
     return (
       <p className="muted">
-        请先在 MetaMask 切换到 <strong>Sepolia</strong>，再操作（否则会先出现「确认」再变成「查看提醒」）。
+        请先在 MetaMask 切换到 <strong>Sepolia</strong>，再操作。
       </p>
     );
   }
@@ -153,15 +188,41 @@ export function CreateAuctionForm({ onSuccess }: Props) {
         onChange={(e) => setDurationMin(e.target.value)}
       />
 
-      {!ownsToken && tokenId && (
+      {tokenId && parsedTokenId === null && (
         <p className="muted" style={{ color: "#f28b82" }}>
-          当前钱包不拥有 Token #{tokenId}。请用 mint 过的账户，或换 ID
-          1/2/3。
+          Token ID 请填写数字，例如 1、2、3。
+        </p>
+      )}
+
+      {rpcLikelyBroken && (
+        <p className="muted" style={{ color: "#f28b82" }}>
+          无法连接 Sepolia RPC。Vercel 请配置环境变量{" "}
+          <code>VITE_SEPOLIA_RPC_URL</code> 后 Redeploy（不要用公共
+          rpc.sepolia.org）。
+        </p>
+      )}
+
+      {parsedTokenId !== null &&
+        !ownerOfLoading &&
+        !rpcLikelyBroken &&
+        !ownsToken && (
+          <p className="muted" style={{ color: "#f28b82" }}>
+            当前钱包不拥有 Token #{tokenId}。在项目根目录执行：
+            <br />
+            <code>
+              TEST_NFT_ADDRESS={TEST_NFT_ADDRESS} npm run mint:nfts
+            </code>
+          </p>
+        )}
+
+      {isSuccess && confirming === false && (
+        <p className="muted" style={{ color: "#8ab4f8" }}>
+          上一笔交易已上链，可继续操作或到下方列表查看。
         </p>
       )}
 
       <p className="muted">
-        授权状态：{isApproved ? "已授权 ✓" : "未授权（先点下面第 1 步）"}
+        授权状态：{isApproved ? "已授权 ✓" : "未授权（先点第 1 步）"}
       </p>
 
       <div className="row">
@@ -200,8 +261,8 @@ export function CreateAuctionForm({ onSuccess }: Props) {
       )}
 
       <p className="muted" style={{ marginTop: "0.75rem" }}>
-        分两步确认，避免 MetaMask 连续弹窗导致「确认变查看提醒」。第 1
-        笔上链后再点第 2 步。
+        第 1 笔确认上链后，再点第 2 步。若整页变黑，请刷新；已修复自动刷新的
+        bug。
       </p>
     </div>
   );

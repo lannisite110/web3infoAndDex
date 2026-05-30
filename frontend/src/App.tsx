@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { ConnectWallet } from "./components/ConnectWallet";
+import { NetworkGuard } from "./components/NetworkGuard";
+import { RpcWarning } from "./components/RpcWarning";
 import { CreateAuctionForm } from "./components/CreateAuctionForm";
 import { AuctionList } from "./components/AuctionList";
 import {
@@ -18,6 +20,9 @@ export default function App() {
         <h1>NFT 拍卖 · Sepolia</h1>
         <ConnectWallet />
       </header>
+
+      <NetworkGuard />
+      <RpcWarning />
 
       {!nftConfigured && (
         <div className="alert">
