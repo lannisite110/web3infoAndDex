@@ -31,9 +31,9 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	mongo, err := connectMongoWithRetry(ctx, cfg.MongoDBURI, cfg.MongoDBName)
-	cancel()
+	slog.Info("connecting to mongodb", "uri", config.MongoURIRedacted(cfg.MongoDBURI))
+
+	mongo, err := connectMongoWithRetry(cfg.MongoDBURI, cfg.MongoDBName)
 	if err != nil {
 		log.Fatalf("mongodb: %v", err)
 	}
@@ -96,19 +96,19 @@ func main() {
 	waitForShutdown(cancelIndexer, ethClient)
 }
 
-func connectMongoWithRetry(ctx context.Context, uri, dbName string) (*db.Mongo, error) {
+func connectMongoWithRetry(uri, dbName string) (*db.Mongo, error) {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		m, err := db.Connect(ctx, uri, dbName)
+		cancel()
 		if err == nil {
 			return m, nil
 		}
 		lastErr = err
 		slog.Warn("mongodb connect failed, retrying", "attempt", attempt, "err", err)
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(time.Duration(attempt) * 2 * time.Second):
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * 3 * time.Second)
 		}
 	}
 	return nil, lastErr

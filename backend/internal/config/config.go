@@ -54,6 +54,9 @@ func Load() (Config, error) {
 	if mongoURI == "" {
 		return Config{}, fmt.Errorf("MONGODB_URI is required (MongoDB Atlas connection string)")
 	}
+	if err := ValidateMongoURI(mongoURI); err != nil {
+		return Config{}, err
+	}
 
 	dbName := sanitizeEnv(os.Getenv("MONGODB_DB"))
 	if dbName == "" {
