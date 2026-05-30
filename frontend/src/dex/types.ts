@@ -24,6 +24,8 @@ export type NFTAuctionDexProps = {
   showHeader?: boolean;
   showContractInfo?: boolean;
   showCreateAuction?: boolean;
+  /** Show REST API search form above auction list (phase 4a). */
+  showAuctionSearch?: boolean;
   className?: string;
   onAuctionCreated?: () => void;
 };

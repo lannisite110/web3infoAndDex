@@ -37,6 +37,22 @@ h1 {
   margin: 0;
 }
 
+.bid-history {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+.bid-history li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #2a2f3a;
+}
+
+.bid-history li:last-child {
+  border-bottom: none;
+}
+
 h2 {
   font-size: 1rem;
   margin: 0 0 0.75rem;

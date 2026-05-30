@@ -51,7 +51,17 @@ func main() {
 		log.Fatalf("auction repository: %v", err)
 	}
 
-	auctionHandler := handler.NewAuctionHandler(auctionRepo, cfg.ChainID, cfg.AuctionContract)
+	bidRepo, err := repository.NewBidRepository(mongo)
+	if err != nil {
+		log.Fatalf("bid repository: %v", err)
+	}
+
+	auctionHandler := handler.NewAuctionHandler(
+		auctionRepo,
+		bidRepo,
+		cfg.ChainID,
+		cfg.AuctionContract,
+	)
 
 	stateRepo := repository.NewIndexerStateRepository(mongo)
 
@@ -65,7 +75,7 @@ func main() {
 			log.Fatalf("ethereum client: %v", err)
 		}
 
-		idx, err := indexer.New(cfg, ethClient, auctionRepo, stateRepo)
+		idx, err := indexer.New(cfg, ethClient, auctionRepo, bidRepo, stateRepo)
 		if err != nil {
 			log.Fatalf("indexer: %v", err)
 		}
@@ -83,7 +93,13 @@ func main() {
 	r.Use(corsMiddleware(cfg.CORSOrigins))
 
 	r.GET("/health", handler.Health(mongo))
-	r.GET("/api/v1/auctions", auctionHandler.List)
+	api := r.Group("/api/v1")
+	{
+		api.GET("/auctions", auctionHandler.List)
+		api.GET("/auctions/:id", auctionHandler.Get)
+		api.GET("/auctions/:id/bids", auctionHandler.ListBids)
+		api.GET("/bids", auctionHandler.ListAllBids)
+	}
 
 	addr := ":" + cfg.Port
 	slog.Info("server listening", "addr", addr, "mongodb", cfg.MongoDBName)

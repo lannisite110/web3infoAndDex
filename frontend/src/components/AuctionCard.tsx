@@ -6,6 +6,7 @@ import {
   useWaitForTransactionReceipt,
 } from "wagmi";
 import nftAuctionAbi from "../abi/NFTAuction.json";
+import { BidHistory } from "./BidHistory";
 import { useDexConfig } from "../dex/DexConfigContext";
 import type { AuctionView } from "../types/auction";
 
@@ -97,6 +98,8 @@ export function AuctionCard({ auction, onUpdated }: Props) {
           : " (暂无出价)"}
       </p>
       <p>剩余: {formatTimeLeft(auction)}</p>
+
+      <BidHistory auctionId={auction.id} />
 
       {canBid && (
         <div style={{ marginTop: "0.75rem" }}>

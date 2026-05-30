@@ -15,6 +15,7 @@ function NFTAuctionDexInner({
   showHeader = true,
   showContractInfo = true,
   showCreateAuction = true,
+  showAuctionSearch = true,
   className = "app",
   onAuctionCreated,
 }: Omit<NFTAuctionDexProps, "embedded" | "config">) {

@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/lannisite110/web3infoanddex/backend/internal/config"
 	"github.com/lannisite110/web3infoanddex/backend/internal/eth"
+	"github.com/lannisite110/web3infoanddex/backend/internal/model"
 	"github.com/lannisite110/web3infoanddex/backend/internal/repository"
 )
 
@@ -21,6 +22,7 @@ type Indexer struct {
 	cfg       config.Config
 	eth       *eth.Client
 	auctions  *repository.AuctionRepository
+	bids      *repository.BidRepository
 	state     *repository.IndexerStateRepository
 	contract  common.Address
 	createdID common.Hash
@@ -33,6 +35,7 @@ func New(
 	cfg config.Config,
 	ethClient *eth.Client,
 	auctions *repository.AuctionRepository,
+	bids *repository.BidRepository,
 	state *repository.IndexerStateRepository,
 ) (*Indexer, error) {
 	if cfg.AuctionContract == "" {
@@ -60,6 +63,7 @@ func New(
 		cfg:       cfg,
 		eth:       ethClient,
 		auctions:  auctions,
+		bids:      bids,
 		state:     state,
 		contract:  common.HexToAddress(cfg.AuctionContract),
 		createdID: created.ID,
@@ -74,6 +78,10 @@ func (idx *Indexer) Run(ctx context.Context) {
 		"contract", idx.contract.Hex(),
 		"interval", idx.cfg.SyncInterval.String(),
 	)
+
+	if err := idx.backfillBids(ctx); err != nil {
+		slog.Error("indexer bid backfill failed", "err", err)
+	}
 
 	if err := idx.syncOnce(ctx, true); err != nil {
 		slog.Error("indexer initial sync failed", "err", err)
@@ -115,6 +123,65 @@ func (idx *Indexer) backfillAuctions(ctx context.Context) error {
 	}
 	slog.Info("indexer backfill done", "auctionCount", count)
 	return nil
+}
+
+func (idx *Indexer) backfillBids(ctx context.Context) error {
+	head, err := idx.eth.Raw().BlockNumber(ctx)
+	if err != nil {
+		return err
+	}
+
+	from := idx.cfg.DeployBlock
+	if from == 0 {
+		if head > 200_000 {
+			from = head - 200_000
+		}
+		slog.Warn("NFT_AUCTION_DEPLOY_BLOCK not set; bid backfill uses recent blocks only",
+			"from", from, "to", head,
+		)
+	}
+
+	slog.Info("indexer bid backfill", "from", from, "to", head)
+	const maxRange = uint64(2000)
+	recorded := 0
+	for start := from; start <= head; {
+		end := start + maxRange - 1
+		if end > head {
+			end = head
+		}
+		n, err := idx.processBidRange(ctx, start, end)
+		if err != nil {
+			return err
+		}
+		recorded += n
+		start = end + 1
+	}
+	slog.Info("indexer bid backfill done", "bids", recorded)
+	return nil
+}
+
+func (idx *Indexer) processBidRange(ctx context.Context, from, to uint64) (int, error) {
+	query := ethereum.FilterQuery{
+		FromBlock: big.NewInt(int64(from)),
+		ToBlock:   big.NewInt(int64(to)),
+		Addresses: []common.Address{idx.contract},
+		Topics:    [][]common.Hash{{idx.bidID}},
+	}
+
+	logs, err := idx.eth.Raw().FilterLogs(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, lg := range logs {
+		if err := idx.recordBid(ctx, lg); err != nil {
+			slog.Warn("record bid", "tx", lg.TxHash.Hex(), "err", err)
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 func (idx *Indexer) syncOnce(ctx context.Context, forceBackfill bool) error {
@@ -184,6 +251,12 @@ func (idx *Indexer) processRange(ctx context.Context, from, to uint64) error {
 
 	seen := make(map[uint64]struct{})
 	for _, lg := range logs {
+		if lg.Topics[0] == idx.bidID {
+			if err := idx.recordBid(ctx, lg); err != nil {
+				slog.Warn("record bid", "tx", lg.TxHash.Hex(), "err", err)
+			}
+		}
+
 		id, err := idx.auctionIDFromLog(lg)
 		if err != nil {
 			slog.Warn("skip log", "tx", lg.TxHash.Hex(), "err", err)
@@ -198,6 +271,29 @@ func (idx *Indexer) processRange(ctx context.Context, from, to uint64) error {
 		}
 	}
 	return nil
+}
+
+func (idx *Indexer) recordBid(ctx context.Context, lg types.Log) error {
+	var out struct {
+		AuctionId *big.Int
+		Bidder    common.Address
+		Amount    *big.Int
+	}
+	if err := idx.eth.ParsedABI().UnpackIntoInterface(&out, "Bid", lg.Data); err != nil {
+		return err
+	}
+
+	bid := model.Bid{
+		ChainID:     idx.cfg.ChainID,
+		Contract:    strings.ToLower(idx.contract.Hex()),
+		AuctionID:   out.AuctionId.Uint64(),
+		Bidder:      strings.ToLower(out.Bidder.Hex()),
+		Amount:      out.Amount.String(),
+		TxHash:      strings.ToLower(lg.TxHash.Hex()),
+		LogIndex:    lg.Index,
+		BlockNumber: lg.BlockNumber,
+	}
+	return idx.bids.Upsert(ctx, bid)
 }
 
 func (idx *Indexer) auctionIDFromLog(lg types.Log) (uint64, error) {

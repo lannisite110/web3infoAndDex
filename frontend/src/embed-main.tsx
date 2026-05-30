@@ -12,6 +12,8 @@ createRoot(document.getElementById("root")!).render(
       embedded
       title="NFT 拍卖 DEX"
       showContractInfo={false}
+      showCreateAuction={false}
+      showAuctionSearch
       className="app"
     />
   </StrictMode>,

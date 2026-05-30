@@ -246,3 +246,33 @@ import { NFTAuctionDex } from "./dex";
 cd frontend && npm run dev
 # 打开 http://localhost:5173/embed.html
 ```
+
+## 阶段 4a：REST 搜索 + 出价历史（MongoDB）
+
+### 新增 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/auctions?q=&seller=&tokenId=&ended=&bidder=` | 拍卖列表（支持筛选） |
+| GET | `/api/v1/auctions/:id` | 单场拍卖 |
+| GET | `/api/v1/auctions/:id/bids` | 该拍卖出价历史 |
+| GET | `/api/v1/bids?bidder=&limit=` | 全局出价记录 |
+
+### 索引器
+
+- 监听 `Bid` 事件写入 MongoDB `bids` 集合  
+- 启动时 **backfill** 历史出价（建议设置 `NFT_AUCTION_DEPLOY_BLOCK`）  
+
+### 本地验证
+
+```bash
+# 终端 1
+cd backend && set -a && source .env && set +a && go run ./cmd/server
+
+# 终端 2
+curl "http://localhost:8080/api/v1/auctions?ended=false"
+curl "http://localhost:8080/api/v1/auctions/3/bids"
+curl "http://localhost:8080/api/v1/bids?bidder=0x..."
+```
+
+前端 / embed：搜索表单 + 每张拍卖卡片「查看出价历史」。
