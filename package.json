@@ -6,6 +6,7 @@
   "scripts": {
     "compile": "hardhat compile",
     "deploy:all": "hardhat run scripts/deploy-all.ts --network sepolia",
+    "mint:nfts": "hardhat run scripts/mint-test-nfts.ts --network sepolia",
     "deploy": "hardhat run scripts/deploy.ts --network sepolia",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
