@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -130,11 +131,11 @@ func waitForShutdown(cancelIndexer context.CancelFunc, ethClient *eth.Client) {
 func corsMiddleware(origins []string) gin.HandlerFunc {
 	allowed := make(map[string]struct{}, len(origins))
 	for _, o := range origins {
-		allowed[o] = struct{}{}
+		allowed[normalizeOrigin(o)] = struct{}{}
 	}
 
 	return func(c *gin.Context) {
-		origin := c.GetHeader("Origin")
+		origin := normalizeOrigin(c.GetHeader("Origin"))
 		if origin != "" {
 			if _, ok := allowed[origin]; ok {
 				c.Header("Access-Control-Allow-Origin", origin)
@@ -149,4 +150,9 @@ func corsMiddleware(origins []string) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func normalizeOrigin(o string) string {
+	o = strings.TrimSpace(o)
+	return strings.TrimSuffix(o, "/")
 }

@@ -33,7 +33,12 @@ export function AuctionList() {
         </button>
         <span className="muted" style={{ fontSize: "0.85rem" }}>
           数据来源：{source === "api" ? "后端 API" : "链上 RPC"}
-          {apiError ? "（API 不可用，已回退链上）" : ""}
+          {apiError ? (
+            <>
+              （API 不可用，已回退链上
+              {apiError instanceof Error ? `：${apiError.message}` : ""}）
+            </>
+          ) : null}
         </span>
       </div>
       {auctions.map((a) => (
