@@ -4,28 +4,59 @@ import nftAuctionAbi from "../abi/NFTAuction.json";
 import { NFT_AUCTION_ADDRESS } from "../config/contracts";
 import type { AuctionOnChain, AuctionView } from "../types/auction";
 
-function parseAuction(raw: readonly unknown[]): AuctionOnChain {
-  const [
-    seller,
-    nftContract,
-    tokenId,
-    startPrice,
-    startTime,
-    duration,
-    highestBidder,
-    highestBid,
-    ended,
-  ] = raw;
+type AuctionStruct = {
+  seller: `0x${string}`;
+  nftContract: `0x${string}`;
+  tokenId: bigint;
+  startPrice: bigint;
+  startTime: bigint;
+  duration: bigint;
+  highestBidder: `0x${string}`;
+  highestBid: bigint;
+  ended: boolean;
+};
+
+/** wagmi/viem 可能返回 struct 对象或元组数组，两种都支持 */
+function parseAuction(raw: unknown): AuctionOnChain | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  if (Array.isArray(raw)) {
+    const [
+      seller,
+      nftContract,
+      tokenId,
+      startPrice,
+      startTime,
+      duration,
+      highestBidder,
+      highestBid,
+      ended,
+    ] = raw;
+    return {
+      seller: seller as `0x${string}`,
+      nftContract: nftContract as `0x${string}`,
+      tokenId: tokenId as bigint,
+      startPrice: startPrice as bigint,
+      startTime: startTime as bigint,
+      duration: duration as bigint,
+      highestBidder: highestBidder as `0x${string}`,
+      highestBid: highestBid as bigint,
+      ended: ended as boolean,
+    };
+  }
+
+  const s = raw as AuctionStruct;
+  if (s.seller === undefined || s.tokenId === undefined) return null;
   return {
-    seller: seller as `0x${string}`,
-    nftContract: nftContract as `0x${string}`,
-    tokenId: tokenId as bigint,
-    startPrice: startPrice as bigint,
-    startTime: startTime as bigint,
-    duration: duration as bigint,
-    highestBidder: highestBidder as `0x${string}`,
-    highestBid: highestBid as bigint,
-    ended: ended as boolean,
+    seller: s.seller,
+    nftContract: s.nftContract,
+    tokenId: s.tokenId,
+    startPrice: s.startPrice,
+    startTime: s.startTime,
+    duration: s.duration,
+    highestBidder: s.highestBidder,
+    highestBid: s.highestBid,
+    ended: s.ended,
   };
 }
 
@@ -40,6 +71,7 @@ export function useAuctions() {
 
   const auctionIds = useMemo(() => {
     const n = count ? Number(count) : 0;
+    if (!Number.isFinite(n) || n < 0) return [];
     return Array.from({ length: n }, (_, i) => i + 1);
   }, [count]);
 
@@ -57,9 +89,11 @@ export function useAuctions() {
   const auctions: AuctionView[] = useMemo(() => {
     if (!results) return [];
     return results.flatMap((item, index) => {
-      if (item.status !== "success" || !item.result) return [];
+      if (item.status !== "success" || item.result == null) return [];
+      const parsed = parseAuction(item.result);
+      if (!parsed) return [];
       const id = auctionIds[index];
-      return [{ id, ...parseAuction(item.result as readonly unknown[]) }];
+      return [{ id, ...parsed }];
     });
   }, [results, auctionIds]);
 
