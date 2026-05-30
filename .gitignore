@@ -35,3 +35,8 @@
 # Local / editor notes
 .agents/
 Untitled
+
+# Go backend
+/backend/bin/
+/backend/server
+/backend/.env
