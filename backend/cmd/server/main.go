@@ -136,13 +136,11 @@ func corsMiddleware(origins []string) gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		origin := normalizeOrigin(c.GetHeader("Origin"))
-		if origin != "" {
-			if _, ok := allowed[origin]; ok {
-				c.Header("Access-Control-Allow-Origin", origin)
-				c.Header("Vary", "Origin")
-				c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-				c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			}
+		if origin != "" && corsOriginAllowed(allowed, origin) {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		}
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -155,4 +153,20 @@ func corsMiddleware(origins []string) gin.HandlerFunc {
 func normalizeOrigin(o string) string {
 	o = strings.TrimSpace(o)
 	return strings.TrimSuffix(o, "/")
+}
+
+// corsOriginAllowed matches exact origins or any *.vercel.app preview when a vercel.app origin is configured.
+func corsOriginAllowed(allowed map[string]struct{}, origin string) bool {
+	if _, ok := allowed[origin]; ok {
+		return true
+	}
+	if !strings.HasSuffix(origin, ".vercel.app") {
+		return false
+	}
+	for o := range allowed {
+		if strings.HasSuffix(o, ".vercel.app") {
+			return true
+		}
+	}
+	return false
 }

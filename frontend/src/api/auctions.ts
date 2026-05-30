@@ -35,7 +35,11 @@ export function mapApiAuction(a: ApiAuction): AuctionView {
 }
 
 export async function fetchAuctionsFromApi(baseUrl: string): Promise<AuctionView[]> {
-  const res = await fetch(`${baseUrl}/api/v1/auctions`);
+  const res = await fetch(`${baseUrl}/api/v1/auctions`, {
+    method: "GET",
+    mode: "cors",
+    signal: AbortSignal.timeout(90_000),
+  });
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${res.statusText}`);
   }

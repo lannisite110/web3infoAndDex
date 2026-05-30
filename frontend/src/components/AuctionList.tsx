@@ -2,8 +2,16 @@ import { useAuctions } from "../hooks/useAuctions";
 import { AuctionCard } from "./AuctionCard";
 
 export function AuctionList() {
-  const { auctions, isLoading, refetch, hasConfig, source, apiError } =
-    useAuctions();
+  const {
+    auctions,
+    isLoading,
+    refetch,
+    hasConfig,
+    source,
+    apiError,
+    apiPending,
+    apiBaseUrl,
+  } = useAuctions();
 
   if (!hasConfig) {
     return <p className="muted">请配置 NFT_AUCTION_ADDRESS。</p>;
@@ -12,7 +20,11 @@ export function AuctionList() {
   if (isLoading) {
     return (
       <p className="muted">
-        {source === "api" ? "从 API 加载拍卖列表…" : "从链上加载拍卖列表…"}
+        {apiPending
+          ? "正在连接后端 API（Render 冷启动可能需要 30～60 秒）…"
+          : source === "api"
+            ? "从 API 加载拍卖列表…"
+            : "从链上加载拍卖列表…"}
       </p>
     );
   }
@@ -36,7 +48,8 @@ export function AuctionList() {
           {apiError ? (
             <>
               （API 不可用，已回退链上
-              {apiError instanceof Error ? `：${apiError.message}` : ""}）
+              {apiError instanceof Error ? `：${apiError.message}` : ""}
+              ；可点刷新重试，API：{apiBaseUrl}）
             </>
           ) : null}
         </span>
