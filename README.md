@@ -30,3 +30,21 @@ npm run dev
 ```bash
 npx hardhat test
 ```
+
+## 部署前端到 Vercel（免费）
+
+1. 打开 [vercel.com](https://vercel.com)，用 **GitHub** 登录  
+2. **Add New → Project**，导入 `lannisite110/web3infoAndDex`  
+3. **Root Directory** 设为 `frontend`（必须）  
+4. **Environment Variables** 添加：
+
+   | 名称 | 值 |
+   |------|-----|
+   | `VITE_SEPOLIA_RPC_URL` | 与本地相同的 Sepolia RPC URL |
+   | `VITE_NFT_AUCTION_ADDRESS` | `deploy-all` 输出的 NFTAuction 地址 |
+   | `VITE_TEST_NFT_ADDRESS` | `deploy-all` 输出的 TestNFT 地址 |
+
+5. 点 **Deploy**，完成后会得到 `https://xxx.vercel.app`  
+6. MetaMask 选 **Sepolia** 后打开该链接即可使用
+
+改环境变量后，在 Vercel 项目里 **Redeploy** 一次才会生效。
