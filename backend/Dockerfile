@@ -1,21 +1,25 @@
-# Render / 任意容器平台
-FROM golang:1.24-alpine AS builder
+# Debian 运行时 + CGO：使用系统 CA 证书连接 Atlas（Alpine 静态编译在 Render 上易 TLS 失败）
+FROM golang:1.24-bookworm AS builder
 
 WORKDIR /src
-RUN apk add --no-cache git ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /server ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /server ./cmd/server
 
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=builder /server ./server
 
-# Render 会注入 PORT；本地默认 8080
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV PORT=8080
 EXPOSE 8080
 
