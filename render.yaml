@@ -13,11 +13,23 @@ services:
         sync: false
       - key: MONGODB_DB
         value: web3dex
+      - key: MYSQL_DSN
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CACHE_TTL_SEC
+        value: "60"
+      - key: STORAGE_READ
+        value: mysql
       - key: CHAIN_ID
         value: "11155111"
       - key: NFT_AUCTION_ADDRESS
         sync: false
       - key: SEPOLIA_RPC_URL
+        sync: false
+      - key: ETHERSCAN_API_KEY
+        sync: false
+      - key: OPENSEA_API_KEY
         sync: false
       - key: SYNC_INTERVAL_SEC
         value: "15"

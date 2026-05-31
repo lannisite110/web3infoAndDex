@@ -16,6 +16,7 @@ import (
 	"github.com/lannisite110/web3infoanddex/backend/internal/db"
 	"github.com/lannisite110/web3infoanddex/backend/internal/model"
 	"github.com/lannisite110/web3infoanddex/backend/internal/repository"
+	mysqlrepo "github.com/lannisite110/web3infoanddex/backend/internal/repository/mysql"
 )
 
 func main() {
@@ -63,7 +64,19 @@ func main() {
 	sample.NFTContract = strings.ToLower(sample.NFTContract)
 
 	if err := repo.Upsert(ctx, sample); err != nil {
-		log.Fatalf("upsert: %v", err)
+		log.Fatalf("mongo upsert: %v", err)
+	}
+
+	mysqlDSN, err := config.NormalizeMySQLDSN(cfg.MySQLDSN)
+	if err == nil {
+		mysqlDB, err := db.ConnectMySQL(ctx, mysqlDSN)
+		if err == nil {
+			defer mysqlDB.Close()
+			mysqlAuctions := mysqlrepo.NewAuctionRepository(mysqlDB)
+			if err := mysqlAuctions.Upsert(ctx, sample); err != nil {
+				log.Printf("mysql seed upsert (optional): %v", err)
+			}
+		}
 	}
 
 	log.Printf("seeded auction #%d on contract %s", sample.AuctionID, sample.Contract)

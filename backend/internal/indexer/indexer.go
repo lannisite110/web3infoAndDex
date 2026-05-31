@@ -11,19 +11,21 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/lannisite110/web3infoanddex/backend/internal/cache"
 	"github.com/lannisite110/web3infoanddex/backend/internal/config"
 	"github.com/lannisite110/web3infoanddex/backend/internal/eth"
 	"github.com/lannisite110/web3infoanddex/backend/internal/model"
 	"github.com/lannisite110/web3infoanddex/backend/internal/repository"
 )
 
-// Indexer syncs NFTAuction events and on-chain state into MongoDB.
+// Indexer syncs NFTAuction events and on-chain state into MongoDB and MySQL.
 type Indexer struct {
 	cfg       config.Config
 	eth       *eth.Client
-	auctions  *repository.AuctionRepository
-	bids      *repository.BidRepository
-	state     *repository.IndexerStateRepository
+	auctions  repository.AuctionStore
+	bids      repository.BidStore
+	state     repository.IndexerStateStore
+	cache     *cache.Client
 	contract  common.Address
 	createdID common.Hash
 	bidID     common.Hash
@@ -34,9 +36,10 @@ type Indexer struct {
 func New(
 	cfg config.Config,
 	ethClient *eth.Client,
-	auctions *repository.AuctionRepository,
-	bids *repository.BidRepository,
-	state *repository.IndexerStateRepository,
+	auctions repository.AuctionStore,
+	bids repository.BidStore,
+	state repository.IndexerStateStore,
+	cacheClient *cache.Client,
 ) (*Indexer, error) {
 	if cfg.AuctionContract == "" {
 		return nil, fmt.Errorf("NFT_AUCTION_ADDRESS is required for indexer")
@@ -65,6 +68,7 @@ func New(
 		auctions:  auctions,
 		bids:      bids,
 		state:     state,
+		cache:     cacheClient,
 		contract:  common.HexToAddress(cfg.AuctionContract),
 		createdID: created.ID,
 		bidID:     bid.ID,
@@ -293,7 +297,13 @@ func (idx *Indexer) recordBid(ctx context.Context, lg types.Log) error {
 		LogIndex:    lg.Index,
 		BlockNumber: lg.BlockNumber,
 	}
-	return idx.bids.Upsert(ctx, bid)
+	if err := idx.bids.Upsert(ctx, bid); err != nil {
+		return err
+	}
+	if idx.cache != nil {
+		idx.cache.InvalidateBid(ctx, idx.cfg.ChainID, bid.Contract, bid.AuctionID)
+	}
+	return nil
 }
 
 func (idx *Indexer) auctionIDFromLog(lg types.Log) (uint64, error) {
@@ -332,5 +342,11 @@ func (idx *Indexer) syncAuction(ctx context.Context, auctionID uint64) error {
 	if err != nil {
 		return err
 	}
-	return idx.auctions.Upsert(ctx, auction)
+	if err := idx.auctions.Upsert(ctx, auction); err != nil {
+		return err
+	}
+	if idx.cache != nil {
+		idx.cache.InvalidateAuction(ctx, idx.cfg.ChainID, auction.Contract, auction.AuctionID)
+	}
+	return nil
 }

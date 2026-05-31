@@ -12,7 +12,7 @@ func ValidateRPCURL(url string) error {
 	}
 	lower := strings.ToLower(url)
 	if strings.HasPrefix(lower, "0x") {
-		return fmt.Errorf("SEPOLIA_RPC_URL looks like a contract address (%s); use your Infura/Alchemy HTTPS URL instead", url)
+		return fmt.Errorf("SEPOLIA_RPC_URL looks like a contract address (%s); use your Alchemy HTTPS URL instead", url)
 	}
 	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "ws://") && !strings.HasPrefix(lower, "wss://") {
 		return fmt.Errorf("SEPOLIA_RPC_URL must start with https:// (got %q)", url)

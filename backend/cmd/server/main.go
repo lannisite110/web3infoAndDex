@@ -11,12 +11,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lannisite110/web3infoanddex/backend/internal/cache"
 	"github.com/lannisite110/web3infoanddex/backend/internal/config"
 	"github.com/lannisite110/web3infoanddex/backend/internal/db"
 	"github.com/lannisite110/web3infoanddex/backend/internal/eth"
 	"github.com/lannisite110/web3infoanddex/backend/internal/handler"
 	"github.com/lannisite110/web3infoanddex/backend/internal/indexer"
+	"github.com/lannisite110/web3infoanddex/backend/internal/migrate"
 	"github.com/lannisite110/web3infoanddex/backend/internal/repository"
+	mysqlrepo "github.com/lannisite110/web3infoanddex/backend/internal/repository/mysql"
 )
 
 func main() {
@@ -33,49 +36,82 @@ func main() {
 	slog.SetDefault(logger)
 
 	slog.Info("connecting to mongodb", "uri", config.MongoURIRedacted(cfg.MongoDBURI))
-
 	mongo, err := connectMongoWithRetry(cfg.MongoDBURI, cfg.MongoDBName)
 	if err != nil {
 		log.Fatalf("mongodb: %v", err)
 	}
+	defer closeMongo(mongo)
+
+	mysqlDSN, err := config.NormalizeMySQLDSN(cfg.MySQLDSN)
+	if err != nil {
+		log.Fatalf("mysql dsn: %v", err)
+	}
+	slog.Info("connecting to mysql")
+	mysql, err := connectMySQLWithRetry(mysqlDSN)
+	if err != nil {
+		log.Fatalf("mysql: %v", err)
+	}
+	defer closeMySQL(mysql)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := migrate.Apply(ctx, mysql); err != nil {
+		log.Fatalf("mysql migrate: %v", err)
+	}
+	slog.Info("mysql migrations ok")
+
+	slog.Info("connecting to redis")
+	redisClient, err := connectRedisWithRetry(cfg.RedisURL, cfg.CacheTTL)
+	if err != nil {
+		log.Fatalf("redis: %v", err)
+	}
 	defer func() {
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := mongo.Close(shutdown); err != nil {
-			slog.Error("mongodb close", "err", err)
+		if err := redisClient.Close(); err != nil {
+			slog.Error("redis close", "err", err)
 		}
 	}()
 
-	auctionRepo, err := repository.NewAuctionRepository(mongo)
+	mongoAuctionRepo, err := repository.NewAuctionRepository(mongo)
 	if err != nil {
-		log.Fatalf("auction repository: %v", err)
+		log.Fatalf("mongo auction repository: %v", err)
+	}
+	mongoBidRepo, err := repository.NewBidRepository(mongo)
+	if err != nil {
+		log.Fatalf("mongo bid repository: %v", err)
 	}
 
-	bidRepo, err := repository.NewBidRepository(mongo)
-	if err != nil {
-		log.Fatalf("bid repository: %v", err)
-	}
+	mysqlAuctionRepo := mysqlrepo.NewAuctionRepository(mysql)
+	mysqlBidRepo := mysqlrepo.NewBidRepository(mysql)
+	mysqlStateRepo := mysqlrepo.NewIndexerStateRepository(mysql)
+
+	mongoStateRepo := repository.NewIndexerStateRepository(mongo)
+	dualAuctions := repository.NewDualAuctionStore(mongoAuctionRepo, mysqlAuctionRepo)
+	dualBids := repository.NewDualBidStore(mongoBidRepo, mysqlBidRepo)
+	dualState := repository.NewDualIndexerStateStore(
+		repository.NewMongoIndexerStateStore(mongoStateRepo),
+		repository.NewMySQLIndexerStateStore(mysqlStateRepo),
+	)
 
 	auctionHandler := handler.NewAuctionHandler(
-		auctionRepo,
-		bidRepo,
+		mysqlAuctionRepo,
+		mysqlBidRepo,
+		redisClient,
 		cfg.ChainID,
 		cfg.AuctionContract,
 	)
-
-	stateRepo := repository.NewIndexerStateRepository(mongo)
+	txHandler := handler.NewTxHandler(cfg)
+	openSeaHandler := handler.NewOpenSeaHandler(cfg)
 
 	var ethClient *eth.Client
 	var cancelIndexer context.CancelFunc
 
 	if cfg.IndexerEnabled() {
-		var err error
 		ethClient, err = eth.NewClient(cfg.SepoliaRPCURL)
 		if err != nil {
 			log.Fatalf("ethereum client: %v", err)
 		}
 
-		idx, err := indexer.New(cfg, ethClient, auctionRepo, bidRepo, stateRepo)
+		idx, err := indexer.New(cfg, ethClient, dualAuctions, dualBids, dualState, redisClient)
 		if err != nil {
 			log.Fatalf("indexer: %v", err)
 		}
@@ -83,7 +119,7 @@ func main() {
 		var indexerCtx context.Context
 		indexerCtx, cancelIndexer = context.WithCancel(context.Background())
 		go idx.Run(indexerCtx)
-		slog.Info("indexer enabled", "rpc", cfg.SepoliaRPCURL)
+		slog.Info("indexer enabled", "rpc", maskRPC(cfg.SepoliaRPCURL))
 	} else {
 		slog.Warn("indexer disabled: set SEPOLIA_RPC_URL and NFT_AUCTION_ADDRESS")
 	}
@@ -92,17 +128,28 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(corsMiddleware(cfg.CORSOrigins))
 
-	r.GET("/health", handler.Health(mongo))
+	r.GET("/health", handler.Health(handler.HealthDeps{
+		Mongo:  mongo,
+		MySQL:  mysql,
+		Redis:  redisClient,
+		Config: cfg,
+	}))
 	api := r.Group("/api/v1")
 	{
 		api.GET("/auctions", auctionHandler.List)
 		api.GET("/auctions/:id", auctionHandler.Get)
 		api.GET("/auctions/:id/bids", auctionHandler.ListBids)
 		api.GET("/bids", auctionHandler.ListAllBids)
+		api.GET("/tx/:hash", txHandler.Get)
+		api.GET("/nft/metadata", openSeaHandler.NFTMetadata)
 	}
 
 	addr := ":" + cfg.Port
-	slog.Info("server listening", "addr", addr, "mongodb", cfg.MongoDBName)
+	slog.Info("server listening",
+		"addr", addr,
+		"mongodb", cfg.MongoDBName,
+		"storageRead", cfg.StorageRead,
+	)
 
 	go func() {
 		if err := r.Run(addr); err != nil {
@@ -111,6 +158,63 @@ func main() {
 	}()
 
 	waitForShutdown(cancelIndexer, ethClient)
+}
+
+func connectMySQLWithRetry(dsn string) (*db.MySQL, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		m, err := db.ConnectMySQL(ctx, dsn)
+		cancel()
+		if err == nil {
+			return m, nil
+		}
+		lastErr = err
+		slog.Warn("mysql connect failed, retrying", "attempt", attempt, "err", err)
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * 3 * time.Second)
+		}
+	}
+	return nil, lastErr
+}
+
+func connectRedisWithRetry(redisURL string, ttl time.Duration) (*cache.Client, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		c, err := cache.Connect(ctx, redisURL, ttl)
+		cancel()
+		if err == nil {
+			return c, nil
+		}
+		lastErr = err
+		slog.Warn("redis connect failed, retrying", "attempt", attempt, "err", err)
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+	}
+	return nil, lastErr
+}
+
+func closeMongo(mongo *db.Mongo) {
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mongo.Close(shutdown); err != nil {
+		slog.Error("mongodb close", "err", err)
+	}
+}
+
+func closeMySQL(mysql *db.MySQL) {
+	if err := mysql.Close(); err != nil {
+		slog.Error("mysql close", "err", err)
+	}
+}
+
+func maskRPC(url string) string {
+	if i := strings.LastIndex(url, "/"); i >= 0 && len(url) > i+8 {
+		return url[:i+1] + "***"
+	}
+	return "***"
 }
 
 func connectMongoWithRetry(uri, dbName string) (*db.Mongo, error) {
@@ -171,7 +275,6 @@ func normalizeOrigin(o string) string {
 	return strings.TrimSuffix(o, "/")
 }
 
-// corsOriginAllowed matches exact origins or any *.vercel.app preview when a vercel.app origin is configured.
 func corsOriginAllowed(allowed map[string]struct{}, origin string) bool {
 	if _, ok := allowed[origin]; ok {
 		return true

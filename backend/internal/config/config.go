@@ -12,6 +12,9 @@ const (
 	DefaultMongoDBName   = "web3dex"
 	DefaultChainID       = 11155111
 	DefaultSyncInterval  = 15 * time.Second
+	DefaultCacheTTL      = 60 * time.Second
+	DefaultOpenSeaBase   = "https://api.opensea.io/api/v2"
+	DefaultStorageRead   = "mysql"
 )
 
 // Config holds runtime settings loaded from environment variables.
@@ -20,11 +23,18 @@ type Config struct {
 	CORSOrigins     []string
 	MongoDBURI      string
 	MongoDBName     string
+	MySQLDSN        string
+	RedisURL        string
+	CacheTTL        time.Duration
+	StorageRead     string
 	ChainID         int64
 	AuctionContract string
 	SepoliaRPCURL   string
 	DeployBlock     uint64
 	SyncInterval    time.Duration
+	EtherscanAPIKey string
+	OpenSeaAPIKey   string
+	OpenSeaBaseURL  string
 }
 
 // Load reads configuration from the environment with sensible defaults for local dev.
@@ -63,6 +73,33 @@ func Load() (Config, error) {
 		dbName = DefaultMongoDBName
 	}
 
+	mysqlDSN := sanitizeEnv(os.Getenv("MYSQL_DSN"))
+	if mysqlDSN == "" {
+		return Config{}, fmt.Errorf("MYSQL_DSN is required (Railway MySQL connection string with ?parseTime=true)")
+	}
+
+	redisURL := sanitizeEnv(os.Getenv("REDIS_URL"))
+	if redisURL == "" {
+		return Config{}, fmt.Errorf("REDIS_URL is required (Upstash rediss:// URL)")
+	}
+
+	cacheTTL := DefaultCacheTTL
+	if v := strings.TrimSpace(os.Getenv("CACHE_TTL_SEC")); v != "" {
+		sec, err := strconv.Atoi(v)
+		if err != nil || sec < 1 {
+			return Config{}, fmt.Errorf("invalid CACHE_TTL_SEC %q", v)
+		}
+		cacheTTL = time.Duration(sec) * time.Second
+	}
+
+	storageRead := strings.ToLower(sanitizeEnv(os.Getenv("STORAGE_READ")))
+	if storageRead == "" {
+		storageRead = DefaultStorageRead
+	}
+	if storageRead != "mysql" {
+		return Config{}, fmt.Errorf("STORAGE_READ must be mysql (got %q)", storageRead)
+	}
+
 	chainID := int64(DefaultChainID)
 	if v := strings.TrimSpace(os.Getenv("CHAIN_ID")); v != "" {
 		parsed, err := strconv.ParseInt(v, 10, 64)
@@ -96,22 +133,39 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	openSeaBase := sanitizeEnv(os.Getenv("OPENSEA_BASE_URL"))
+	if openSeaBase == "" {
+		openSeaBase = DefaultOpenSeaBase
+	}
+
 	return Config{
 		Port:            port,
 		CORSOrigins:     origins,
 		MongoDBURI:      mongoURI,
 		MongoDBName:     dbName,
+		MySQLDSN:        mysqlDSN,
+		RedisURL:        redisURL,
+		CacheTTL:        cacheTTL,
+		StorageRead:     storageRead,
 		ChainID:         chainID,
 		AuctionContract: auctionContract,
 		SepoliaRPCURL:   sepoliaRPC,
 		DeployBlock:     deployBlock,
 		SyncInterval:    syncInterval,
+		EtherscanAPIKey: sanitizeEnv(os.Getenv("ETHERSCAN_API_KEY")),
+		OpenSeaAPIKey:   sanitizeEnv(os.Getenv("OPENSEA_API_KEY")),
+		OpenSeaBaseURL:  openSeaBase,
 	}, nil
 }
 
 // IndexerEnabled reports whether background chain sync should run.
 func (c Config) IndexerEnabled() bool {
 	return c.SepoliaRPCURL != "" && c.AuctionContract != ""
+}
+
+// EtherscanEnabled reports whether the tx lookup API can call Etherscan.
+func (c Config) EtherscanEnabled() bool {
+	return c.EtherscanAPIKey != ""
 }
 
 // sanitizeEnv trims whitespace and surrounding quotes from dashboard-pasted values.

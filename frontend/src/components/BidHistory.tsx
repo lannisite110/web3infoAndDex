@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { formatEther } from "viem";
 import { fetchBidsForAuction } from "../api/auctions";
+import { etherscanTxUrl } from "../api/tx";
 import { useDexConfig } from "../dex/DexConfigContext";
 import { isApiEnabled } from "../dex/resolveConfig";
 
@@ -64,6 +65,19 @@ export function BidHistory({ auctionId }: Props) {
                   <span className="muted">
                     {" "}
                     · {b.bidder.slice(0, 8)}… · 区块 {b.blockNumber}
+                    {b.txHash ? (
+                      <>
+                        {" "}
+                        ·{" "}
+                        <a
+                          href={etherscanTxUrl(b.txHash)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Etherscan
+                        </a>
+                      </>
+                    ) : null}
                   </span>
                 </li>
               ))}

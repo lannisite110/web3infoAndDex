@@ -276,3 +276,61 @@ curl "http://localhost:8080/api/v1/bids?bidder=0x..."
 ```
 
 前端 / embed：搜索表单 + 每张拍卖卡片「查看出价历史」。
+
+## 阶段 4b：MySQL + Redis + Alchemy + Etherscan（全线上）
+
+### 架构
+
+- **MongoDB Atlas**：索引器双写（事件缓冲）
+- **Railway MySQL**：API 读主库（拍卖 / 出价关系查询）
+- **Upstash Redis**：标准缓存（列表、详情、bids；索引更新后失效）
+- **Alchemy**：`SEPOLIA_RPC_URL`（Sepolia RPC）
+- **Etherscan**：`GET /api/v1/tx/:hash` 查询交易 receipt
+- **OpenSea**：`GET /api/v1/nft/metadata` 占位（配置 `OPENSEA_API_KEY` 后扩展）
+
+### 新增 / 变更 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/tx/:hash` | Etherscan 交易 receipt + `etherscanUrl` |
+| GET | `/api/v1/nft/metadata?contract=&tokenId=` | OpenSea 占位（未配置 key 时 501） |
+| GET | `/health` | 增加 `mysql`、`redis` 状态 |
+
+已有拍卖 / 出价 API 行为不变，响应头可选 `X-Cache: HIT|MISS`。
+
+### 环境变量（Render 必填）
+
+除 4a 的 `MONGODB_URI`、`SEPOLIA_RPC_URL`、`NFT_AUCTION_ADDRESS` 外，增加：
+
+| 变量 | 来源 |
+|------|------|
+| `MYSQL_DSN` | Railway MySQL Connection URL |
+| `REDIS_URL` | Upstash Redis URL（`rediss://`） |
+| `ETHERSCAN_API_KEY` | etherscan.io API Keys |
+| `SEPOLIA_RPC_URL` | `https://eth-sepolia.g.alchemy.com/v2/<KEY>` |
+
+可选：`NFT_AUCTION_DEPLOY_BLOCK`、`OPENSEA_API_KEY`、`CACHE_TTL_SEC`（默认 60）。
+
+### 部署步骤
+
+1. **Railway**：创建 MySQL，复制连接串到 Render `MYSQL_DSN`（支持 `mysql://` 格式，服务启动时自动 migrate）。
+2. **Upstash**：创建 Redis，复制 URL 到 Render `REDIS_URL`。
+3. **Alchemy / Etherscan**：更新 Render 中 `SEPOLIA_RPC_URL`、`ETHERSCAN_API_KEY`。
+4. **Render Redeploy** 后检查：`curl https://web3infoanddex-api.onrender.com/health`
+5. **历史数据**：若 Mongo 已有数据、MySQL 为空，在本地或 CI 执行一次：
+   ```bash
+   cd backend && set -a && source .env && set +a && go run ./cmd/sync-mongo-to-mysql
+   ```
+
+### 本地验证
+
+```bash
+cd backend && cp .env.example .env   # 填齐 MYSQL_DSN、REDIS_URL、Alchemy、Etherscan
+set -a && source .env && set +a && go run ./cmd/server
+
+curl http://localhost:8080/health
+curl "http://localhost:8080/api/v1/auctions?ended=false"
+curl "http://localhost:8080/api/v1/tx/0x<某笔出价tx>"
+```
+
+前端出价历史每条可点击 **Etherscan** 链接。
