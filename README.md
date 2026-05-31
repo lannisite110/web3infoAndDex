@@ -288,13 +288,20 @@ curl "http://localhost:8080/api/v1/bids?bidder=0x..."
 - **Etherscan**：`GET /api/v1/tx/:hash` 查询交易 receipt
 - **OpenSea**：`GET /api/v1/nft/metadata` 占位（配置 `OPENSEA_API_KEY` 后扩展）
 
+### 读库灾备（`STORAGE_READ=auto`，推荐）
+
+- 索引器仍 **双写 MongoDB + MySQL**（MySQL 可用时）。
+- API **优先读 MySQL**；连接失败或单行缺失时 **自动读 MongoDB**。
+- Railway MySQL 到期或不可用时：设 `STORAGE_READ=auto`，服务可继续用 Mongo 提供 API；`/health` 会显示 `"readBackend":"mongodb"`。
+- `STORAGE_READ=mysql` 仅 MySQL；`STORAGE_READ=mongo` 仅 Mongo（不要求 `MYSQL_DSN`）。
+
 ### 新增 / 变更 API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/tx/:hash` | Etherscan 交易 receipt + `etherscanUrl` |
 | GET | `/api/v1/nft/metadata?contract=&tokenId=` | OpenSea 占位（未配置 key 时 501） |
-| GET | `/health` | 增加 `mysql`、`redis` 状态 |
+| GET | `/health` | `mysql` / `redis` / `readBackend`（`mysql` 或 `mongodb`） |
 
 已有拍卖 / 出价 API 行为不变，响应头可选 `X-Cache: HIT|MISS`。
 
@@ -309,7 +316,7 @@ curl "http://localhost:8080/api/v1/bids?bidder=0x..."
 | `ETHERSCAN_API_KEY` | etherscan.io API Keys |
 | `SEPOLIA_RPC_URL` | `https://eth-sepolia.g.alchemy.com/v2/<KEY>` |
 
-可选：`NFT_AUCTION_DEPLOY_BLOCK`、`OPENSEA_API_KEY`、`CACHE_TTL_SEC`（默认 60）。
+推荐：`STORAGE_READ=auto`。可选：`NFT_AUCTION_DEPLOY_BLOCK`、`OPENSEA_API_KEY`、`CACHE_TTL_SEC`（默认 60）。
 
 ### 部署步骤
 

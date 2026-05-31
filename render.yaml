@@ -20,7 +20,7 @@ services:
       - key: CACHE_TTL_SEC
         value: "60"
       - key: STORAGE_READ
-        value: mysql
+        value: auto
       - key: CHAIN_ID
         value: "11155111"
       - key: NFT_AUCTION_ADDRESS

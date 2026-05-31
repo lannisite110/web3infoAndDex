@@ -14,7 +14,7 @@ const (
 	DefaultSyncInterval  = 15 * time.Second
 	DefaultCacheTTL      = 60 * time.Second
 	DefaultOpenSeaBase   = "https://api.opensea.io/api/v2"
-	DefaultStorageRead   = "mysql"
+	DefaultStorageRead   = "auto"
 )
 
 // Config holds runtime settings loaded from environment variables.
@@ -74,9 +74,6 @@ func Load() (Config, error) {
 	}
 
 	mysqlDSN := sanitizeEnv(os.Getenv("MYSQL_DSN"))
-	if mysqlDSN == "" {
-		return Config{}, fmt.Errorf("MYSQL_DSN is required (Railway MySQL connection string with ?parseTime=true)")
-	}
 
 	redisURL := sanitizeEnv(os.Getenv("REDIS_URL"))
 	if redisURL == "" {
@@ -96,8 +93,17 @@ func Load() (Config, error) {
 	if storageRead == "" {
 		storageRead = DefaultStorageRead
 	}
-	if storageRead != "mysql" {
-		return Config{}, fmt.Errorf("STORAGE_READ must be mysql (got %q)", storageRead)
+	switch storageRead {
+	case "mysql", "mongo", "auto":
+	default:
+		return Config{}, fmt.Errorf("STORAGE_READ must be mysql, mongo, or auto (got %q)", storageRead)
+	}
+
+	if mysqlDSN == "" && storageRead == "mysql" {
+		return Config{}, fmt.Errorf("MYSQL_DSN is required when STORAGE_READ=mysql")
+	}
+	if mysqlDSN == "" && storageRead == "auto" {
+		// MySQL optional: API/indexer use Mongo when Railway MySQL is unavailable.
 	}
 
 	chainID := int64(DefaultChainID)

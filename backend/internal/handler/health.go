@@ -12,10 +12,10 @@ import (
 
 // HealthDeps groups dependencies for the health check endpoint.
 type HealthDeps struct {
-	Mongo      *db.Mongo
-	MySQL      *db.MySQL
-	Redis      *cache.Client
-	Config     config.Config
+	Mongo  *db.Mongo
+	MySQL  *db.MySQL // nil when MySQL is disabled or unreachable in auto mode
+	Redis  *cache.Client
+	Config config.Config
 }
 
 // Health responds with service liveness for load balancers and Render health checks.
@@ -29,22 +29,53 @@ func Health(deps HealthDeps) gin.HandlerFunc {
 			"mysql":       "ok",
 			"redis":       "ok",
 			"storageRead": deps.Config.StorageRead,
+			"readBackend": "mysql",
 			"phase":       "4b",
 		}
 
 		degraded := false
+		mongoOK := true
 
 		if err := deps.Mongo.Ping(c.Request.Context()); err != nil {
 			payload["mongodb"] = "error"
+			mongoOK = false
 			degraded = true
 		}
-		if err := deps.MySQL.Ping(c.Request.Context()); err != nil {
+
+		mysqlOK := false
+		if deps.MySQL == nil {
+			payload["mysql"] = "disabled"
+		} else if err := deps.MySQL.Ping(c.Request.Context()); err != nil {
 			payload["mysql"] = "error"
-			degraded = true
+		} else {
+			mysqlOK = true
 		}
+
 		if err := deps.Redis.Ping(c.Request.Context()); err != nil {
 			payload["redis"] = "error"
 			degraded = true
+		}
+
+		switch deps.Config.StorageRead {
+		case "auto":
+			if mysqlOK {
+				payload["readBackend"] = "mysql"
+			} else if mongoOK {
+				payload["readBackend"] = "mongodb"
+				// API can still serve reads from Mongo backup.
+			} else {
+				degraded = true
+			}
+		case "mongo":
+			payload["readBackend"] = "mongodb"
+			if !mongoOK {
+				degraded = true
+			}
+		default: // mysql
+			payload["readBackend"] = "mysql"
+			if !mysqlOK {
+				degraded = true
+			}
 		}
 
 		if deps.Config.EtherscanEnabled() {

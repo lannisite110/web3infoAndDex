@@ -42,23 +42,24 @@ func main() {
 	}
 	defer closeMongo(mongo)
 
-	mysqlDSN, err := config.NormalizeMySQLDSN(cfg.MySQLDSN)
-	if err != nil {
-		log.Fatalf("mysql dsn: %v", err)
-	}
-	slog.Info("connecting to mysql")
-	mysql, err := connectMySQLWithRetry(mysqlDSN)
+	mysql, err := connectMySQLOptional(cfg)
 	if err != nil {
 		log.Fatalf("mysql: %v", err)
 	}
-	defer closeMySQL(mysql)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	if err := migrate.Apply(ctx, mysql); err != nil {
-		log.Fatalf("mysql migrate: %v", err)
+	if mysql != nil {
+		defer closeMySQL(mysql)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		if err := migrate.Apply(ctx, mysql); err != nil {
+			cancel()
+			log.Fatalf("mysql migrate: %v", err)
+		}
+		cancel()
+		slog.Info("mysql migrations ok")
+	} else if cfg.StorageRead == "mysql" {
+		log.Fatal("mysql: MYSQL_DSN required when STORAGE_READ=mysql")
+	} else {
+		slog.Warn("mysql unavailable; reads use mongodb", "storageRead", cfg.StorageRead)
 	}
-	slog.Info("mysql migrations ok")
 
 	slog.Info("connecting to redis")
 	redisClient, err := connectRedisWithRetry(cfg.RedisURL, cfg.CacheTTL)
@@ -80,21 +81,35 @@ func main() {
 		log.Fatalf("mongo bid repository: %v", err)
 	}
 
-	mysqlAuctionRepo := mysqlrepo.NewAuctionRepository(mysql)
-	mysqlBidRepo := mysqlrepo.NewBidRepository(mysql)
-	mysqlStateRepo := mysqlrepo.NewIndexerStateRepository(mysql)
+	var mysqlAuctionRepo repository.AuctionStore
+	var mysqlBidRepo repository.BidStore
+	var mysqlStateRepo repository.IndexerStateStore
+	if mysql != nil {
+		mysqlAuctionRepo = mysqlrepo.NewAuctionRepository(mysql)
+		mysqlBidRepo = mysqlrepo.NewBidRepository(mysql)
+		mysqlStateRepo = repository.NewMySQLIndexerStateStore(
+			mysqlrepo.NewIndexerStateRepository(mysql),
+		)
+	}
 
 	mongoStateRepo := repository.NewIndexerStateRepository(mongo)
-	dualAuctions := repository.NewDualAuctionStore(mongoAuctionRepo, mysqlAuctionRepo)
-	dualBids := repository.NewDualBidStore(mongoBidRepo, mysqlBidRepo)
-	dualState := repository.NewDualIndexerStateStore(
-		repository.NewMongoIndexerStateStore(mongoStateRepo),
-		repository.NewMySQLIndexerStateStore(mysqlStateRepo),
-	)
+	var dualAuctions repository.AuctionStore = mongoAuctionRepo
+	var dualBids repository.BidStore = mongoBidRepo
+	var dualState repository.IndexerStateStore = repository.NewMongoIndexerStateStore(mongoStateRepo)
+	if mysql != nil {
+		dualAuctions = repository.NewDualAuctionStore(mongoAuctionRepo, mysqlAuctionRepo)
+		dualBids = repository.NewDualBidStore(mongoBidRepo, mysqlBidRepo)
+		dualState = repository.NewDualIndexerStateStore(
+			repository.NewMongoIndexerStateStore(mongoStateRepo),
+			mysqlStateRepo,
+		)
+	}
+
+	readAuctions, readBids := resolveReadStores(cfg, mongoAuctionRepo, mongoBidRepo, mysqlAuctionRepo, mysqlBidRepo)
 
 	auctionHandler := handler.NewAuctionHandler(
-		mysqlAuctionRepo,
-		mysqlBidRepo,
+		readAuctions,
+		readBids,
 		redisClient,
 		cfg.ChainID,
 		cfg.AuctionContract,
@@ -160,6 +175,48 @@ func main() {
 	waitForShutdown(cancelIndexer, ethClient)
 }
 
+func connectMySQLOptional(cfg config.Config) (*db.MySQL, error) {
+	if cfg.MySQLDSN == "" {
+		return nil, nil
+	}
+	dsn, err := config.NormalizeMySQLDSN(cfg.MySQLDSN)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("connecting to mysql")
+	m, err := connectMySQLWithRetry(dsn)
+	if err != nil {
+		if cfg.StorageRead == "auto" || cfg.StorageRead == "mongo" {
+			slog.Warn("mysql connect failed; continuing without mysql", "err", err)
+			return nil, nil
+		}
+		return nil, err
+	}
+	return m, nil
+}
+
+func resolveReadStores(
+	cfg config.Config,
+	mongoAuctions repository.AuctionStore,
+	mongoBids repository.BidStore,
+	mysqlAuctions repository.AuctionStore,
+	mysqlBids repository.BidStore,
+) (repository.AuctionStore, repository.BidStore) {
+	switch cfg.StorageRead {
+	case "mongo":
+		return mongoAuctions, mongoBids
+	case "mysql":
+		return mysqlAuctions, mysqlBids
+	default: // auto
+		if mysqlAuctions != nil && mysqlBids != nil {
+			return repository.NewReadFallbackAuctionStore(mysqlAuctions, mongoAuctions),
+				repository.NewReadFallbackBidStore(mysqlBids, mongoBids)
+		}
+		slog.Info("api read backend: mongodb only")
+		return mongoAuctions, mongoBids
+	}
+}
+
 func connectMySQLWithRetry(dsn string) (*db.MySQL, error) {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -205,6 +262,9 @@ func closeMongo(mongo *db.Mongo) {
 }
 
 func closeMySQL(mysql *db.MySQL) {
+	if mysql == nil {
+		return
+	}
 	if err := mysql.Close(); err != nil {
 		slog.Error("mysql close", "err", err)
 	}
